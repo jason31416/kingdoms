@@ -23,6 +23,7 @@ class block:
         self.district_border = False
         self.army = 0
         self.district = ""
+        self.lst_no_capital = False
 
 def army_size_to_str(amsz):
     if amsz < 1000:
@@ -81,13 +82,36 @@ class kingdom:
         self.basic_defence = 10
         self.army_in_cell = 0
         self.peaceful = random.randint(2, 5)
+        self.relations = {}
+        self.enemy_defence = 15
+        self.district_defence = 5
+        self.dead = False
+
+    def getrelationpoints(self, t):
+        if t in self.relations:
+            return self.relations[t]
+        else:
+            return 0
+
+    def modifyrelationpoints(self, t, v):
+        if t in self.relations:
+            self.relations[t] += v
+        else:
+            self.relations[t] = v
+        if self.relations[t] < -100:
+            self.relations[t] = -100
+        if self.relations[t] > 100:
+            self.relations[t] = 100
 
     def aiupdate(self):
         if self.area != 0:
             self.lst_self_area = self.area
         if self.border_length != 0:
             self.lst_border_length = self.border_length
-        self.basic_defence = max(self.army // 2 // self.lst_border_length, 5)
+        if self.lst_border_length != 0:
+            self.basic_defence = max(self.army // 2 // self.lst_border_length, 5)
+            self.enemy_defence = int(self.basic_defence*1.5)
+            self.district_defence = int(self.basic_defence/1.5)
         if gm.tick % 10 == 0:
             for i in self.enemy:
                 if i in self.ally:
@@ -98,38 +122,70 @@ class kingdom:
                 self.ally.append(i)
                 self.allyreq.remove(i)
 
-        mxpk, mnpk = "", ""
-        for i in self.adj_kingdoms:
-            if mxpk == "" or kingdoms[mxpk].calc_score() < kingdoms[i].calc_score():
-                mxpk = i
-            if mnpk == "" or kingdoms[mnpk].calc_score() > kingdoms[i].calc_score():
-                mnpk = i
-        if len(self.enemy) == 0:
-            if mnpk != "" and kingdoms[mnpk].calc_score()*(1+self.peaceful/10) < self.calc_score():
-                self.enemy.append(mnpk)
-                kingdoms[mnpk].enemy.append(self.name)
-            elif mxpk != "" and kingdoms[mxpk].calc_score() < self.calc_score()*1.5:
-                self.enemy.append(mxpk)
-                kingdoms[mxpk].enemy.append(self.name)
-        if mnpk != "":
+        if gm.tick % random.randint(4, 6) == 0:
+            mxpk, mnpk = "", ""
             for i in self.adj_kingdoms:
-                if i != mxpk and kingdoms[mnpk].calc_score()*(1+self.peaceful/10) >= self.calc_score():
-                    kingdoms[i].allyreq.append(self.name)
+                if mxpk == "" or kingdoms[mxpk].calc_score() < kingdoms[i].calc_score():
+                    mxpk = i
+                if mnpk == "" or kingdoms[mnpk].calc_score() > kingdoms[i].calc_score():
+                    mnpk = i
+            if len(self.enemy) == 0:
+                if mnpk != "" and kingdoms[mnpk].calc_score()*(1+self.peaceful/10) < self.calc_score() and self.getrelationpoints(mnpk) < self.peaceful*3-4:
+                    self.enemy.append(mnpk)
+                    kingdoms[mnpk].enemy.append(self.name)
+                else:
+                    allya = False
+                    for i in self.ally:
+                        if self.getrelationpoints(i) >= self.peaceful*9:
+                            if len(kingdoms[i].enemy) > 0 and kingdoms[i].enemy[0] in self.adj_kingdoms and kingdoms[i] not in self.ally:
+                                self.enemy.append(kingdoms[i].enemy[0])
+                                kingdoms[kingdoms[i].enemy[0]].enemy.append(self.name)
+                                allya = True
+                                break
+                    if allya:
+                        pass
+                    elif mxpk != "" and kingdoms[mxpk].calc_score() < self.calc_score()*1.5 and self.getrelationpoints(mnpk) < self.peaceful*3-4:
+                        self.enemy.append(mxpk)
+                        kingdoms[mxpk].enemy.append(self.name)
+                    elif self.getrelationpoints(mnpk) == -100:
+                        self.enemy.append(mnpk)
+                        kingdoms[mnpk].enemy.append(self.name)
+            if mnpk != "":
+                for i in self.adj_kingdoms:
+                    if i != mxpk and kingdoms[mnpk].calc_score()*(1+self.peaceful/10) >= self.calc_score() and self.getrelationpoints(mnpk) >= -self.peaceful*3:
+                        kingdoms[i].allyreq.append(self.name)
+                if len(self.enemy) > 0 and kingdoms[self.enemy[0]].calc_score() > self.calc_score():
+                    for i in kingdoms[self.enemy[0]].adj_kingdoms:
+                        if i not in self.enemy:
+                            kingdoms[i].allyreq.append(self.name)
 
     def update(self):
         for i in self.enemy.copy():
-            if kingdoms[i].area == 0:
+            if kingdoms[i].dead:
                 self.enemy.remove(i)
                 kingdoms[i].enemy.remove(self.name)
+            else:
+                self.modifyrelationpoints(i, -0.01)
+        for i in self.ally.copy():
+            if kingdoms[i].dead:
+                self.ally.remove(i)
+            else:
+                self.modifyrelationpoints(i, 0.005)
+        for i in self.adj_kingdoms:
+            if i not in self.ally and i not in self.enemy:
+                if self.getrelationpoints(i) > 0:
+                    self.modifyrelationpoints(i, -0.005)
+                elif self.getrelationpoints(i) < 0:
+                    self.modifyrelationpoints(i, 0.005)
         if self.name != "player":
             self.aiupdate()
         else:
             # gm.draw_text("Player", (self.capital[0] - vx) * blksz, (self.capital[1] - vy) * blksz, color=(0, 0, 0))
             pass
     def calc_score(self):
-        return self.army + self.army_in_cell + self.gold + self.area*10
+        return self.army//10 + self.army_in_cell*10 + self.gold + self.area*10
 
-blkattrs = [ba((0, 0, 0), "Bedrock", False, 1000000), ba((0, 200, 0), "Grass", True, 10), ba((0, 60, 255), "Ocean", False, 1000000), ba((247, 238, 214), "Sand", True, 10), ba((100, 100, 100), "Mountain", True, 200), ba((255, 255, 255), "Snow", True, 10)]
+blkattrs = [ba((0, 0, 0), "Bedrock", False, 1000000), ba((255, 255, 255), "Grass", True, 10), ba((0, 60, 255), "Ocean", False, 1000000), ba((255, 255, 255), "Sand", True, 10), ba((100, 100, 100), "Mountain", True, 200), ba((255, 255, 255), "Snow", True, 10)]
 world = [[block(0) for i in range(wsize)] for j in range(wsize)]
 
 kingdoms = {}
@@ -149,7 +205,7 @@ vy = 0
 
 # generate world:
 
-namechoices = ["Mongolia", "North Korea", "South Korea", "Japan", "Philippines", "Vietnam", "Laos", "Cambodia", "Myanmar", "Thailand", "Malaysia", "Brunei", "Singapore", "Indonesia", "East Timor", "Nepal", "Bhutan", "Bangladesh", "India", "Pakistan", "Sri Lanka", "Maldives", "Kazakhstan", "Kyrgyzstan", "Tajikistan", "Uzbekistan", "Turkmenistan", "Afghanistan", "Iraq", "Iran", "Syria", "Jordan", "Lebanon", "Israel", "Palestine", "Saudi Arabia", "Bahrain", "Qatar", "Kuwait", "United Arab Emirates", "Oman", "Yemen", "Georgia", "Armenia", "Azerbaijan", "Turkey", "Cyprus", "43个国家", "Finland", "Sweden", "Norway", "Iceland", "Denmark", "Faroe Islands", "Estonia", "Latvia", "Lithuania", "Belorussia", "Russia", "Ukraine", "Moldova", "Poland", "Czecho", "slovakia", "Hungary", "German", "Austria", "Switzerland", "Liechtenstein", "United Kingdom", "Ireland", "Netherlands", "Belgium", "Luxembourg", "France", "Monaco", "Romania", "Bulgaria", "Serbia", "Macedonia", "Albania", "Greece", "Slovenia", "Croatia", "Bosnia-Herzegovina", "Italy", "Vatican", "San Marino", "Malta", "Spain", "Portugal", "Andorra", "United States of America", "Canada", "the United Mexican States", "Guatemala", "Belize", "Salvador", "Honduras", "Panama", "Bahamas", "Cuba", "Jamaica", "Haiti", "The Dominican Republic", "Costa Rica", "Saint Kitts and Nevis", "Antigua and Barbuda", "The Commonwealth of Dominica", "Saint Lucia", "Saint Vincent and the Grenadines", "Barbados", "Grenada", "Trinidad and Tobago", "Nicaragua"]
+namechoices = ["Mongolia", "North Korea", "South Korea", "Japan", "Philippines", "Vietnam", "Laos", "Cambodia", "Myanmar", "Thailand", "Malaysia", "Brunei", "Singapore", "Indonesia", "East Timor", "Nepal", "Bhutan", "Bangladesh", "India", "Pakistan", "Sri Lanka", "Maldives", "Kazakhstan", "Kyrgyzstan", "Tajikistan", "Uzbekistan", "Turkmenistan", "Afghanistan", "Iraq", "Iran", "Syria", "Jordan", "Lebanon", "Israel", "Palestine", "Saudi Arabia", "Bahrain", "Qatar", "Kuwait", "United Arab Emirates", "Oman", "Yemen", "Georgia", "Armenia", "Azerbaijan", "Turkey", "Cyprus", "Finland", "Sweden", "Norway", "Iceland", "Denmark", "Faroe Islands", "Estonia", "Latvia", "Lithuania", "Belorussia", "Russia", "Ukraine", "Moldova", "Poland", "Czecho", "slovakia", "Hungary", "German", "Austria", "Switzerland", "Liechtenstein", "United Kingdom", "Ireland", "Netherlands", "Belgium", "Luxembourg", "France", "Monaco", "Romania", "Bulgaria", "Serbia", "Macedonia", "Albania", "Greece", "Slovenia", "Croatia", "Bosnia-Herzegovina", "Italy", "Vatican", "San Marino", "Malta", "Spain", "Portugal", "Andorra", "United States of America", "Canada", "the United Mexican States", "Guatemala", "Belize", "Salvador", "Honduras", "Panama", "Bahamas", "Cuba", "Jamaica", "Haiti", "The Dominican Republic", "Costa Rica", "Saint Kitts and Nevis", "Antigua and Barbuda", "The Commonwealth of Dominica", "Saint Lucia", "Saint Vincent and the Grenadines", "Barbados", "Grenada", "Trinidad and Tobago", "Nicaragua"]
 
 def getaname():
     if len(namechoices) <= 0 or random.randint(0, 2) == 0:
@@ -181,11 +237,18 @@ def getaname():
 
 def generate_world(gm: pyge.Game):
     global x, y
+    rseed = input("seed?")
+    if rseed == "":
+        rseed = str(int(time.time()*1002))
+        print("Seed: ", rseed)
+
+    random.seed(rseed)
     print(f"\rGenerating world: 0/100%", end="")
     build_biomes()
     build_world()
+    random.seed(time.time()*1002)
     kingdom("player")
-    for i in range(random.randint(60, 100)):
+    for i in range(random.randint(40, 80)):
         kingdom(getaname())
     x, y = kingdoms["player"].capital
 
@@ -302,8 +365,36 @@ def update_each_cell():
         for i in range(wsize):
             for j in range(wsize):
                 if world[i][j].kingdom != "" and upd_tick % ticks_per_day == 0:
+                    if world[i][j].army < 0:
+                        world[i][j].army = 0
                     if world[kingdoms[world[i][j].kingdom].capital[0]][kingdoms[world[i][j].kingdom].capital[1]].kingdom != world[i][j].kingdom:
-                        world[i][j].kingdom = world[kingdoms[world[i][j].kingdom].capital[0]][kingdoms[world[i][j].kingdom].capital[1]].kingdom
+                        if world[i][j].district != world[kingdoms[world[i][j].kingdom].capital[0]][kingdoms[world[i][j].kingdom].capital[1]].district and random.randint(0, 1000) == 0:
+                            bb = True
+                            for k, l in adjs:
+                                if 0 <= i + k < wsize and 0 <= j + l < wsize and world[i+k][j+l].kingdom != world[i][j].kingdom:
+                                    bb=False
+                                    break
+                            if bb:
+                                kingdoms[world[i][j].kingdom].capital = (i, j)
+                                world[i][j].lst_no_capital = False
+                        elif world[i][j].lst_no_capital or world[i][j].district == world[kingdoms[world[i][j].kingdom].capital[0]][kingdoms[world[i][j].kingdom].capital[1]].district:
+                            world[i][j].kingdom = ""
+                            world[i][j].lst_no_capital = False
+                            continue
+                        else:
+                            world[i][j].lst_no_capital = True
+                    else:
+                        world[i][j].lst_no_capital = False
+                        if (i, j) != kingdoms[world[i][j].kingdom].capital:
+                            bb = True
+                            for k, l in adjs:
+                                if 0 <= i+k < wsize and 0 <= j+l < wsize:
+                                    if world[i+k][j+l].kingdom == world[i][j].kingdom:
+                                        bb = False
+                                        break
+                            if bb:
+                                world[i][j].kingdom = ""
+                                continue
                     for k, l in adjs:
                         if 0 <= i+k < wsize and 0 <= j+l < wsize:
                             if world[i+k][j+l].kingdom == "" and world[i+k][j+l].tp not in (2, 4) and world[i][j].lst_upd_tick != upd_tick:
@@ -315,17 +406,17 @@ def update_each_cell():
                                 for kx, lx in adjs:
                                     if 0 <= i + k + kx < wsize and 0 <= j + l + lx < wsize and world[i + k + kx][j + l + lx].kingdom == world[i][j].kingdom:
                                         totala += world[i + k + kx][j + l + lx].army
-                                if totala > world[i+k][j+l].army:
+                                if totala >= world[i+k][j+l].army:# and world[i][j].army > min(10, kingdoms[world[i][j].kingdom].basic_defence):
                                     world[i][j].army -= random.randint(0, 10)
                                     world[i+k][j+l].army -= random.randint(0, 10)
                                     if world[i+k][j+l].army <= 0:
                                         world[i+k][j+l].kingdom = world[i][j].kingdom
-                                        world[i+k][j+l].army = 10
+                                        world[i+k][j+l].army = 5
                                         world[i][j].army //= 2
                                         world[i+k][j+l].lst_upd_tick = upd_tick
                                     elif world[i][j].army <= 0:
                                         world[i][j].kingdom = world[i+k][j+l].kingdom
-                                        world[i][j].army = 10
+                                        world[i][j].army = 5
                                         world[i][j].lst_upd_tick = upd_tick
                                         world[i+k][j+l].army //= 2
                 if world[i][j].kingdom != "":
@@ -350,17 +441,38 @@ def update_each_cell():
                         amp += 1
                         glp += random.randint(1, 2)
                     if upd_tick % ticks_per_day == 0:
-                        if upd_tick % (ticks_per_day*10) == 0 and kingdoms[world[i][j].kingdom].gold>=10*amp: # will change to 3*amp after finish gold system
+                        if upd_tick % (ticks_per_day*(7 if days >= 100 else 1)) == 0 and kingdoms[world[i][j].kingdom].gold>=10*amp:
                             kingdoms[world[i][j].kingdom].army += amp
-                            kingdoms[world[i][j].kingdom].gold -= 7*amp
-                        if upd_tick % (ticks_per_day * 3) == 0:
+                            kingdoms[world[i][j].kingdom].gold -= 10*amp
+                        if upd_tick % (ticks_per_day*2) == 0:
                             kingdoms[world[i][j].kingdom].gold += glp
-                        if kingdoms[world[i][j].kingdom].army >= 1 and world[i][j].army < kingdoms[world[i][j].kingdom].basic_defence and world[i][j].border:
+                        bb = False
+                        for k, l in adjs:
+                            if 0 <= i+k < wsize and 0 <= j+l < wsize:
+                                if world[i+k][j+l].kingdom in kingdoms[world[i][j].kingdom].enemy:
+                                    bb=True
+                                    break
+                        if bb and kingdoms[world[i][j].kingdom].army >= 1 and world[i][j].army < kingdoms[world[i][j].kingdom].enemy_defence and kingdoms[world[i][j].kingdom].gold >= max(int(dist(i, j, kingdoms[world[i][j].kingdom].capital[0], kingdoms[world[i][j].kingdom].capital[1])//10), 1):
                             kingdoms[world[i][j].kingdom].army -= 1
                             world[i][j].army += 1
+                            kingdoms[world[i][j].kingdom].gold -= max(
+                                int(dist(i, j, kingdoms[world[i][j].kingdom].capital[0],
+                                         kingdoms[world[i][j].kingdom].capital[1]) // 10), 1)
+                        elif not bb and kingdoms[world[i][j].kingdom].army >= 1 and world[i][j].army < kingdoms[world[i][j].kingdom].basic_defence and world[i][j].border and kingdoms[world[i][j].kingdom].gold >= max(int(dist(i, j, kingdoms[world[i][j].kingdom].capital[0], kingdoms[world[i][j].kingdom].capital[1])//20), 1):
+                            cnt = min(kingdoms[world[i][j].kingdom].army, min(kingdoms[world[i][j].kingdom].basic_defence - world[i][j].army, kingdoms[world[i][j].kingdom].gold // max(int(dist(i, j, kingdoms[world[i][j].kingdom].capital[0], kingdoms[world[i][j].kingdom].capital[1])//20), 1)))
+                            kingdoms[world[i][j].kingdom].army -= cnt
+                            world[i][j].army += cnt
+                            kingdoms[world[i][j].kingdom].gold -= cnt*max(int(dist(i, j, kingdoms[world[i][j].kingdom].capital[0], kingdoms[world[i][j].kingdom].capital[1])//10), 1)
                         elif not world[i][j].border and world[i][j].army >= kingdoms[world[i][j].kingdom].basic_defence//2:
                             kingdoms[world[i][j].kingdom].army += world[i][j].army - kingdoms[world[i][j].kingdom].basic_defence//2
                             world[i][j].army = kingdoms[world[i][j].kingdom].basic_defence//2
+                        elif world[i][j].district_border and world[i][j].army < kingdoms[world[i][j].kingdom].district_defence and kingdoms[world[i][j].kingdom].army >= 1 and kingdoms[world[i][j].kingdom].gold >= max(int(dist(i, j, kingdoms[world[i][j].kingdom].capital[0], kingdoms[world[i][j].kingdom].capital[1])//10), 1):
+                            world[i][j].army += 1
+                            kingdoms[world[i][j].kingdom].gold -= max(int(dist(i, j, kingdoms[world[i][j].kingdom].capital[0], kingdoms[world[i][j].kingdom].capital[1])//10), 1)
+                            kingdoms[world[i][j].kingdom].army -= 1
+        for i in kingdoms:
+            if kingdoms[i].area == 0:
+                kingdoms[i].dead = True
         while time.time()-ntm < 1/20:
             time.sleep(0.001)
         upd_tick += 1
@@ -372,7 +484,7 @@ class game(pyge.Game):
         self.tick_rate = 20
         generate_world(self)
 
-    def draw_text(self, text, x, y, size = 24, font = "pingfang", ft=None, color = (255, 255, 255)):
+    def draw_text(self, text, x, y, size = 24, font = "pingfang", ft=None, color = (0, 0, 0)):
         if ft is None:
             ft = pygame.font.SysFont(font, size)
         txt = ft.render(text, False, color)
@@ -400,7 +512,16 @@ class game(pyge.Game):
                 ticks_per_day += 1
             if self.keys[pyge.constant.K_h]:
                 x, y = kingdoms["player"].capital
-            ticks_per_day = min(max(10, ticks_per_day), 100)
+            if self.keys[pyge.constant.K_u]:
+                kingdoms["player"].basic_defence -= 1
+            if self.keys[pyge.constant.K_o]:
+                kingdoms["player"].basic_defence += 1
+            if self.keys[pyge.constant.K_j]:
+                kingdoms["player"].enemy_defence -= 1
+            if self.keys[pyge.constant.K_l]:
+                kingdoms["player"].enemy_defence += 1
+
+            ticks_per_day = min(max(5, ticks_per_day), 100)
 
             blksz = min(max(3, int(blksza)), 50)
 
@@ -432,6 +553,21 @@ class game(pyge.Game):
                                         ((i - vx) * blksz, (j - vy) * blksz))
                                 if self.mouse_click[2] and self.mouse_pos[0] // blksz == i - vx and self.mouse_pos[1] // blksz == j - vy:
                                     viewing = (i, j)
+                                if self.mouse_click[0] and self.mouse_pos[0] // blksz == i - vx and self.mouse_pos[1] // blksz == j - vy:
+                                    if self.keys[pyge.constant.K_k] and kingdoms[world[i][j].kingdom].name not in kingdoms["player"].enemy:
+                                        kingdoms["player"].enemy.append(kingdoms[world[i][j].kingdom].name)
+                                        kingdoms[kingdoms[world[i][j].kingdom].name].enemy.append("player")
+                                    if self.keys[pyge.constant.K_i] and kingdoms[world[i][j].kingdom].name in kingdoms[
+                                        "player"].enemy:
+                                        kingdoms["player"].enemy.remove(kingdoms[world[i][j].kingdom].name)
+                                        kingdoms[kingdoms[world[i][j].kingdom].name].enemy.remove("player")
+                                    if self.keys[pyge.constant.K_f] and kingdoms[world[i][j].kingdom].name not in kingdoms[
+                                        "player"].ally and kingdoms[world[i][j].kingdom].name in kingdoms["player"].allyreq:
+                                        kingdoms["player"].ally.append(kingdoms[world[i][j].kingdom].name)
+                                        kingdoms["player"].allyreq.remove(kingdoms[world[i][j].kingdom].name)
+
+
+
                         elif map_mode == 1:
                             if world[i][j].kingdom == "player":
                                 self.sc.blit(
@@ -497,6 +633,13 @@ class game(pyge.Game):
                 self.draw_text(f"enemies: {kingdoms[viewing[1]].enemy}", 100, 80, size=20, color=(0, 0, 0))
                 self.draw_text(f"gold: {kingdoms[viewing[1]].gold}", 100, 100, size=20, color=(0, 0, 0))
                 self.draw_text(f"size: {kingdoms[viewing[1]].area}", 100, 120, size=20, color=(0, 0, 0))
+                self.draw_text(f"relations:", 100, 140, size=20, color=(0, 0, 0))
+                yy = 160
+                for i in kingdoms[viewing[1]].relations.keys():
+                    ii = kingdoms[viewing[1]].relations[i]
+                    if ii != 0 and kingdoms[i].area != 0:
+                        self.draw_text(f"{i}: {round(ii, 2)}", 120, yy, size=20, color=(0, 0, 0))
+                        yy += 20
 
 
         for i in kingdoms.keys():
@@ -505,6 +648,11 @@ class game(pyge.Game):
         self.draw_text("fps: "+str(int(self.fps)), 0, 0)
         self.draw_text("Day "+str(int(days)), 0, 30)
         self.draw_text("tpd: "+str(int(ticks_per_day)), 0, 60)
+
+        self.draw_text("army: "+str(int(kingdoms["player"].army)), 650, 30, size=18)
+        self.draw_text("gold: "+str(int(kingdoms["player"].gold)), 650, 50, size=18)
+        self.draw_text("basic defence: "+str(int(kingdoms["player"].basic_defence)), 630, 70, size=18)
+        self.draw_text("attack strength: "+str(int(kingdoms["player"].enemy_defence)), 630, 90, size=18)
 
 
 gm = game()
